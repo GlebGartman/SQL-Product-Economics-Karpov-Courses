@@ -107,5 +107,85 @@ SELECT date,
 
 ---
 
+<summary><strong>Задание 3: Накопленные метрики — Running ARPU, ARPPU, AOV</strong></summary>
+
+📌 Для каждого дня рассчитаны накопительные показатели выручки:
+
+- `running_arpu` — накопленная выручка на одного пользователя  
+- `running_arppu` — накопленная выручка на одного платящего пользователя  
+- `running_aov` — накопленная выручка на один заказ (средний чек)  
+- `date` — дата
+
+💡 Все значения округлены до двух знаков после запятой.  
+📅 Результирующая таблица отсортирована по возрастанию даты.
+
+
+### Код
+
+```sql
+WITH plat as (
+   SELECT order_id
+   FROM user_actions
+   group by order_id
+   HAVING count(order_id) = 1
+   order by order_id
+   ), 
+   
+  unique_day_users_pay as (SELECT date, COUNT(user_id) AS new_paying_users 
+    FROM ( 
+        SELECT user_id, MIN(time::date) AS date 
+        FROM user_actions 
+        WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action = 'cancel_order') 
+        GROUP BY user_id 
+    ) as data GROUP BY date),
+   
+ unique_day_users as 
+ (
+SELECT time_user, count(time_user) FILTER(WHERE porydok = 1) as new_users, count(time_user) FILTER(WHERE numer = 1) as new_users_plat FROM 
+ (SELECT user_id, order_id, time::date AS time_user, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY time) AS porydok,
+   CASE 
+     WHEN order_id IN (SELECT order_id FROM plat) THEN 
+       ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY time)
+   END AS numer
+ FROM user_actions
+    order by user_id) as porydok_users
+ group by time_user
+ order by time_user)
+   
+--SELECT * FROM plat 
+--SELECT * FROM unique_day_users
+ 
+  SELECT date,
+  ROUND(sum_nakop::NUMERIC / kolvo_user_nakop::NUMERIC, 2) as running_arpu,
+  ROUND(sum_nakop / plat_user_nakop::NUMERIC, 2) as running_arppu,
+  ROUND(sum_nakop / plat_zakaz_nakop::NUMERIC, 2) as running_aov
+  FROM  
+   (
+   SELECT date,
+    sum(revenue) over(order by date) as sum_nakop,
+    sum(plat_user) over(order by date) as plat_user_nakop,
+    sum(kolvo_user) over(order by date) as kolvo_user_nakop,
+    sum(plat_zakaz) over(order by date) as plat_zakaz_nakop
+    FROM
+    (SELECT zakazy.date as date,
+      sum(revenue) FILTER (WHERE order_id in (SELECT * FROM plat)) as revenue,
+      new_users as kolvo_user,
+      new_paying_users  as plat_user,
+      count(DISTINCT order_id) FILTER (WHERE order_id in (SELECT * FROM plat)) as plat_zakaz
+      FROM
+       (SELECT time::DATE as date, user_id, ua.order_id, action, revenue FROM
+        (SELECT  order_id, sum(price) as revenue FROM  
+         (SELECT order_id, creation_time, UNNEST(product_ids) as product_id FROM orders) as tovars 
+          LEFT JOIN products as p on p.product_id = tovars.product_id
+          group by order_id) as product_orders
+         LEFT JOIN user_actions as ua on ua.order_id = product_orders.order_id
+         order by date) as zakazy
+     JOIN  unique_day_users on unique_day_users.time_user = zakazy.date
+     JOIN unique_day_users_pay on unique_day_users_pay.date = zakazy.date
+     group by zakazy.date, new_users,new_paying_users) as nakoplen) as metrics
+
+```
+
+
 
 </details>
