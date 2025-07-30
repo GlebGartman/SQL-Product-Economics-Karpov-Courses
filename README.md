@@ -186,6 +186,11 @@ SELECT time_user, count(time_user) FILTER(WHERE porydok = 1) as new_users, count
 
 ```
 
+### Динамика накопленных показателей ARPU, ARPPU и AOV
+
+![График: Running ARPU, ARPPU, AOV](https://drive.google.com/uc?export=view&id=1ztIPPDoIO_9OkPGshcYPdZXzQnMV-tDz)
+
+---
 
 
 </details>
