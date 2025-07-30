@@ -6,4 +6,4 @@
 
 
 <details>
-<summary><strong>Задания</strong></summary>
+<summary><strong>Результаты</strong></summary>
