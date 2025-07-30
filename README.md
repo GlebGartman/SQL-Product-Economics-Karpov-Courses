@@ -54,16 +54,58 @@ WITH plat as (
 
 ---
 
+<summary><strong>Задание 2: ARPU, ARPPU и AOV</strong></summary>
+
+📌 Для каждого дня рассчитаны ключевые метрики выручки:
+
+- `arpu` — средняя выручка на одного пользователя (Average Revenue Per User)  
+- `arppu` — средняя выручка на одного платящего пользователя (Average Revenue Per Paying User)  
+- `aov` — средний чек, или выручка с заказа (Average Order Value)  
+- `date` — дата
+
+💡 Все значения округлены до двух знаков после запятой.  
+📅 Таблица отсортирована по дате по возрастанию.
 
 
+### Код
 
+```sql
+WITH plat as (
+   SELECT order_id
+   FROM user_actions
+   group by order_id
+   HAVING count(order_id) = 1
+   order by order_id
+   )
+   
 
+SELECT date,
+  ROUND(revenue::NUMERIC / kolvo_user::NUMERIC, 2) as arpu,
+  ROUND(revenue / plat_user::NUMERIC, 2) as arppu,
+  ROUND(revenue / plat_zakaz::NUMERIC, 2) as aov
+  FROM  
+   (SELECT date,
+    sum(revenue) FILTER (WHERE order_id in (SELECT * FROM plat)) as revenue,
+    count(DISTINCT user_id) FILTER (WHERE order_id in (SELECT * FROM plat)) as plat_user,
+    count(DISTINCT user_id) as kolvo_user,
+    count(DISTINCT order_id) FILTER (WHERE order_id in (SELECT * FROM plat)) as plat_zakaz
+    FROM
+     (SELECT time::DATE as date, user_id, ua.order_id, action, revenue FROM
+      (SELECT  order_id, sum(price) as revenue FROM  
+       (SELECT order_id, creation_time, UNNEST(product_ids) as product_id FROM orders) as tovars 
+        LEFT JOIN products as p on p.product_id = tovars.product_id
+        group by order_id) as product_orders
+       LEFT JOIN user_actions as ua on ua.order_id = product_orders.order_id
+       order by date) as zakazy
+   group by date) as metrics
 
+```
 
+### Динамика ARPU, ARPPU и AOV
 
+![График: ARPU, ARPPU и AOV](https://drive.google.com/uc?export=view&id=1GBh7PlWGE_gLX7AmiZPuRZ7y0s5GwYI7)
 
-
-
+---
 
 
 </details>
