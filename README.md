@@ -505,12 +505,14 @@ couriers as (SELECT courier_id, order_id, time::DATE as date FROM courier_action
 
 ```
 
-### 📊 Динамика валовой прибыли и её доли в выручке  
-[Смотреть график](https://drive.google.com/file/d/1rTJ2BSWdPRRjNJDiarnJoDfhu3hg5cHY/view?usp=drive_link)
+### Динамика валовой прибыли и её доли в выручке  
+![gross profit](https://drive.google.com/uc?export=view&id=1ukvUlSa2VnscRBG4WaNsa15gsD4KaF_0)
 
+---
 
-### 📈 Суммарная валовая прибыль и её доля в суммарной выручке  
-[Смотреть график](https://drive.google.com/file/d/1CVtQGU1bV5H8xnGoC5VXOPo2jeqIcWiX/view?usp=drive_link)
+### Суммарная валовая прибыль и её доля в суммарной выручке  
+![total gross profit](https://drive.google.com/uc?export=view&id=1CVtQGU1bV5H8xnGoC5VXOPo2jeqIcWiX)
+
 
 
 </details>
