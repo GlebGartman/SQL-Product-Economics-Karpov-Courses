@@ -192,5 +192,335 @@ SELECT time_user, count(time_user) FILTER(WHERE porydok = 1) as new_users, count
 
 ---
 
+<summary><strong>Задание 4: Метрики ARPU / ARPPU / AOV по дням недели</strong></summary>
+
+📌 Для каждого дня недели в диапазоне с **26 августа по 8 сентября 2022 года** рассчитаны следующие показатели:
+
+- `arpu` — выручка на одного пользователя  
+- `arppu` — выручка на одного платящего пользователя  
+- `aov` — выручка на один заказ (средний чек)  
+- `weekday` — наименование дня недели (например, Monday)  
+- `weekday_number` — порядковый номер дня недели (1 — Monday, 7 — Sunday)
+
+📆 В расчёт включено **ровно по два дня каждого дня недели**.  
+📊 Все значения округлены до двух знаков после запятой.  
+📅 Результат отсортирован по `weekday_number`.
+
+
+### Код
+
+```sql
+   WITH plat as (
+   SELECT order_id
+   FROM user_actions
+   group by order_id
+   HAVING count(order_id) = 1
+   order by order_id
+   )
+   
+  SELECT
+  weekday,
+  weekday_number, 
+  ROUND(revenue::NUMERIC / kolvo_user::NUMERIC, 2) as arpu,
+  ROUND(revenue / plat_user::NUMERIC, 2) as arppu,
+  ROUND(revenue / plat_zakaz::NUMERIC, 2) as aov
+  FROM  
+   (SELECT weekday, weekday_number, 
+    sum(revenue) FILTER (WHERE order_id in (SELECT * FROM plat)) as revenue,
+    count(DISTINCT user_id) FILTER (WHERE order_id in (SELECT * FROM plat)) as plat_user,
+    count(DISTINCT user_id) as kolvo_user,
+    count(DISTINCT order_id) FILTER (WHERE order_id in (SELECT * FROM plat)) as plat_zakaz
+      FROM
+      (SELECT to_char(date, 'Day') as weekday, DATE_PART('ISODOW', date) as weekday_number, date, user_id, order_id, action, revenue FROM
+       (SELECT time::DATE as date, user_id, ua.order_id, action, revenue FROM
+        (SELECT  order_id, sum(price) as revenue FROM  
+         (SELECT order_id, creation_time, UNNEST(product_ids) as product_id FROM orders) as tovars 
+          LEFT JOIN products as p on p.product_id = tovars.product_id
+          group by order_id) as product_orders
+         LEFT JOIN user_actions as ua on ua.order_id = product_orders.order_id
+         order by date) as zakazy
+       WHERE date >= '2022-08-26' and date < '2022-09-09') as dni
+      group by weekday_number, weekday) as metrics
+     order by weekday_number, weekday
+
+```
+
+
+### Динамика ARPU, ARPPU и AOV по дням недели
+
+![График: ARPU, ARPPU и AOV по дням недели](https://drive.google.com/uc?export=view&id=1LOUmfJ0Ok6BYfrWdnK3uV963YYFhJIdH)
+
+---
+
+<summary><strong>Задание 5: Доля выручки от новых и старых пользователей</strong></summary>
+
+📌 Для каждого дня рассчитаны следующие показатели:
+
+- `revenue` — общая выручка, полученная в этот день  
+- `new_users_revenue` — выручка от заказов **новых пользователей**  
+- `new_users_revenue_share` — доля выручки от новых пользователей (%)  
+- `old_users_revenue_share` — доля выручки от остальных пользователей (%)  
+- `date` — дата
+
+📊 Все доли выражены в процентах и округлены до двух знаков после запятой.  
+📅 Результат отсортирован по возрастанию даты.
+
+
+### Код
+
+```sql
+
+WITH plat as (
+   SELECT order_id
+   FROM user_actions
+   group by order_id
+   HAVING count(order_id) = 1
+   order by order_id
+   ),
+   
+unique_day_users_pay as (
+SELECT user_id, MIN(time::date) AS date 
+        FROM user_actions 
+        GROUP BY user_id 
+    )
+  
+   
+  SELECT date, 
+  revenue,
+  new_users_revenue,
+  ROUND(new_users_revenue * 100 / revenue::NUMERIC, 2) as new_users_revenue_share,
+  ROUND((revenue - new_users_revenue) * 100 / revenue::NUMERIC, 2) as old_users_revenue_share
+  FROM
+   (SELECT date, sum(revenue) as revenue, sum(revenue) FILTER(WHERE pay_user_id IS NOT NULL) as new_users_revenue FROM 
+     (SELECT time::DATE as date, ua.user_id as user_id, uap.user_id as pay_user_id, ua.order_id, revenue FROM 
+      (SELECT order_id, sum(price) as revenue FROM
+       (SELECT order_id, UNNEST(product_ids) as product_id FROM orders
+        WHERE order_id in (SELECT * FROM plat) 
+        order by order_id) as tovars
+       JOIN products as p on p.product_id = tovars.product_id
+       group by order_id) as zakazy
+     JOIN user_actions as ua on ua.order_id = zakazy.order_id
+     LEFT JOIN unique_day_users_pay as uap on uap.user_id = ua.user_id and uap.date = ua.time::DATE
+    order by user_id, date) as stoimost
+   group by date) as revenues
+  order by date
+ 
+```
+
+### Динамика долей выручки от новых и старых пользователей
+
+![График: доля выручки от новых и старых пользователей](https://drive.google.com/uc?export=view&id=1vaeeKo5-r8VhzXq4dtVVC83t0QVuLSAm)
+
+---
+
+<summary><strong>Задание 6: Выручка по товарам и категория "ДРУГОЕ"</strong></summary>
+
+📌 Для каждого товара рассчитаны показатели за весь период:
+
+- `product_name` — название товара  
+- `revenue` — суммарная выручка от товара  
+- `share_in_revenue` — доля выручки от товара в общей выручке (%)
+
+🔢 Доля (`share_in_revenue`) округлена до двух знаков после запятой и выражена в процентах.  
+🔻 Все товары с долей **менее 0.5%** объединены в категорию **ДРУГОЕ**, с суммированием их округлённых долей.  
+📊 Результат отсортирован по убыванию выручки.
+
+
+### Код
+
+```sql
+
+WITH plat as (
+SELECT order_id
+FROM user_actions
+group by order_id 
+HAVING count(order_id) = 1
+order by order_id 
+)
+
+
+  SELECT product_name, sum(revenue) as revenue, sum(procent) as share_in_revenue FROM 
+   (SELECT 
+    CASE    
+    WHEN procent < 0.5 THEN 'ДРУГОЕ'  
+    ELSE name
+    END as product_name,
+    revenue,
+    procent 
+    FROM
+   (SELECT name, revenue, ROUND(revenue * 100 / summa::NUMERIC, 2) as procent FROM
+    (SELECT name, revenue, sum(revenue) over() as summa FROM 
+      (SELECT name, sum(price) as revenue FROM
+       (SELECT order_id, UNNEST(product_ids) as product_id FROM orders
+        WHERE order_id in (SELECT * FROM plat)
+        order by order_id) as tovars
+      JOIN  products as p on p.product_id = tovars.product_id
+      group by name) as prices) as vyruchka) as procents) as category
+    group by product_name
+    order by revenue desc
+
+```
+
+
+### Распределение выручки по товарам
+
+![График: распределение выручки по товарам](https://drive.google.com/uc?export=view&id=1ukvUlSa2VnscRBG4WaNsa15gsD4KaF_0)
+
+---
+
+<summary><strong>Задание 7: Выручка, затраты и валовая прибыль</strong></summary>
+
+📌 Для каждого дня рассчитаны следующие показатели:
+
+- `revenue` — выручка, полученная в этот день  
+- `costs` — затраты курьеров за день  
+- `tax` — сумма НДС с продажи товаров за день  
+- `gross_profit` — валовая прибыль за день (выручка − затраты − НДС)  
+- `total_revenue` — накопленная выручка  
+- `total_costs` — накопленные затраты  
+- `total_tax` — накопленный НДС  
+- `total_gross_profit` — накопленная валовая прибыль  
+- `gross_profit_ratio` — доля валовой прибыли в выручке за день (%)  
+- `total_gross_profit_ratio` — доля накопленной валовой прибыли в накопленной выручке (%)
+
+📊 Все значения долей выражены в процентах и округлены до двух знаков после запятой.  
+📅 Результат отсортирован по возрастанию даты.
+
+
+
+### Код
+
+```sql
+WITH plat as (
+SELECT order_id
+FROM user_actions
+group by order_id 
+HAVING count(order_id) = 1
+order by order_id 
+), 
+
+nalog as (SELECT order_id, sum(price) as price, sum(nds) as nds 
+ FROM
+  (SELECT order_id, name, price,
+  CASE 
+  WHEN name in ('сахар', 'сухарики', 'сушки', 'семечки', 
+'масло льняное', 'виноград', 'масло оливковое', 
+'арбуз', 'батон', 'йогурт', 'сливки', 'гречка', 
+'овсянка', 'макароны', 'баранина', 'апельсины', 
+'бублики', 'хлеб', 'горох', 'сметана', 'рыба копченая', 
+'мука', 'шпроты', 'сосиски', 'свинина', 'рис', 
+'масло кунжутное', 'сгущенка', 'ананас', 'говядина', 
+'соль', 'рыба вяленая', 'масло подсолнечное', 'яблоки', 
+'груши', 'лепешка', 'молоко', 'курица', 'лаваш', 'вафли', 'мандарины')
+
+THEN ROUND(price  / 11::NUMERIC, 2)
+ELSE ROUND(price  / 6::NUMERIC, 2)
+END as NDS
+FROM
+   (SELECT order_id, name, price FROM 
+        (SELECT order_id, UNNEST(product_ids) as product_id FROM orders
+         WHERE order_id in (SELECT * FROM plat)
+         order by order_id) as tovars
+       JOIN products as p on p.product_id = tovars.product_id
+       order by order_id) as names) as spisok
+ group by order_id),
+ 
+--ВАЖНАЯ ТАБЛИЦА!!!
+nakop as  (SELECT  date, revenue, tax, total_revenue, total_tax, zatrata_na_sborka + zatrata_v_day as zatraty_users
+  FROM
+  (SELECT date, price as revenue, nds as tax,
+   sum(price) over(order by date) as total_revenue, sum(nds) over(order by date) total_tax, 
+   kolvo,
+   CASE   
+   WHEN DATE_PART('month', date) = 8 THEN kolvo * 140
+   ELSE kolvo * 115
+   END as zatrata_na_sborka,
+   CASE   
+   WHEN DATE_PART('month', date) = 8 THEN 120000
+   ELSE 150000
+   END as zatrata_v_day
+   FROM   
+  (SELECT date, sum(price) as price, sum(nds) as nds, count(order_id) as kolvo FROM
+     (SELECT user_id, ua.order_id as order_id,  time::DATE as date, price, nds FROM nalog as n    
+      JOIN user_actions as ua on ua.order_id = n.order_id
+      order by user_id) as summa
+    group by date
+    order by date) as zarabotok) as money
+    ),
+    
+couriers as (SELECT courier_id, order_id, time::DATE as date FROM courier_actions
+   WHERE order_id in (SELECT * FROM plat) and action = 'deliver_order'
+   order by courier_id),
+   
+
+ zatrata_na_couriera as (SELECT date, kolvo * 150 as zatrata_na_kyry   
+    FROM
+    (SELECT date, count(order_id) as kolvo FROM couriers
+     group by date
+     order by date) as chislo),
+     
+   
+ top_five as (SELECT date, 
+  CASE   
+  WHEN DATE_PART('month', date) = 8 THEN kolvo_top * 400
+   ELSE kolvo_top * 500
+   END as zatrata_na_top_5
+   FROM
+   (SELECT date, count(kolvo) as kolvo_top
+    FROM 
+    (SELECT courier_id, date, count(order_id) as kolvo FROM couriers
+     group by courier_id, date
+     HAVING count(order_id) >= 5  
+     order by date) as top
+    group by date
+    order by date) as top_5),
+    
+  --ВАЖНАЯ ТАБЛИЦА!!!   
+ zatrata_couriers as (SELECT date, zatrata_na_kyry + zatrata_na_top_5 as zatrata_day_couriers FROM
+   (SELECT znc.date, zatrata_na_kyry, COALESCE(zatrata_na_top_5, 0) as zatrata_na_top_5 FROM zatrata_na_couriera AS znc
+     LEFT JOIN  top_five as tf on tf.date = znc.date) as zatraty_obchie_couries)
+   
+  
+  SELECT date,
+   revenue, costs, tax,
+   gross_profit,
+   total_revenue, total_costs, total_tax, 
+   total_gross_profit,
+   gross_profit_ratio, 
+   ROUND(total_gross_profit * 100 / total_revenue::NUMERIC, 2) as total_gross_profit_ratio
+   FROM
+   (SELECT date,
+   revenue, costs, tax,
+   gross_profit,
+   total_revenue, total_costs, total_tax, 
+   sum(gross_profit) over(order by date) as total_gross_profit,
+   ROUND(gross_profit * 100 / revenue::NUMERIC, 2) as gross_profit_ratio
+   FROM
+    (SELECT  date, revenue, tax, costs,
+     revenue - tax - costs as gross_profit,
+     total_revenue, total_tax, sum(costs) over(order by date) as total_costs
+     FROM 
+      (SELECT n.date as date, revenue, tax, total_revenue, total_tax, (zatraty_users + zatrata_day_couriers)::NUMERIC as costs FROM nakop as n   
+       JOIN zatrata_couriers as zc on zc.date = n.date) as podvodka) as podchet) as metrics
+
+```
+
+### 📊 Динамика валовой прибыли и её доли в выручке  
+[Смотреть график](https://drive.google.com/file/d/1rTJ2BSWdPRRjNJDiarnJoDfhu3hg5cHY/view?usp=drive_link)
+
+
+### 📈 Суммарная валовая прибыль и её доля в суммарной выручке  
+[Смотреть график](https://drive.google.com/file/d/1CVtQGU1bV5H8xnGoC5VXOPo2jeqIcWiX/view?usp=drive_link)
+
+
+</details>
+
+<details> 
+
+<summary><strong>Выводы</strong></summary>
+
+📌 На основе рассчитанных показателей и визуализированных графиков был построен итоговый дашборд.
+
+🔗 [Открыть дашборд в Redash](https://redash.public.karpov.courses/public/dashboards/SpodlHrsXdn5vTDNirtCWJcINDuch1fuqHRx0mFD?org_slug=default)
 
 </details>
